@@ -33,7 +33,7 @@ testDbConnection();
 // CORS configuration
 const allowedOrigins = [
     'http://localhost:19006',
-    'http://localhost:8081',
+    'http://localhost',
     'http://127.0.0.1:19006',
     'http://127.0.0.1:8081',
     'https://your-frontend-app-url.com'
