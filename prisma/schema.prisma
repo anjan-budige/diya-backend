@@ -1,0 +1,350 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+    id        Int      @id @default(autoincrement())
+    fullname  String
+    email     String   @unique
+    password  String
+    bio       String?
+    mobile    String?
+    language  String
+    avatar    String?
+    isOnline  Boolean  @default(false)
+    lastSeen  DateTime @default(now())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // User's music library and activities
+    likedSongs     LikedSong[]
+    likedAlbums    LikedAlbum[]
+    likedArtists   LikedArtist[]
+    likedPlaylists LikedPlaylist[]
+
+    // User created playlists
+    playlists Playlist[]
+
+    // User's listening history and activities
+    playHistory  PlayHistory[]
+    userSettings UserSettings?
+
+    // Vibe sessions (multi-user sync music)
+    createdVibes VibeSession[]     @relation("VibeCreator")
+    joinedVibes  VibeParticipant[]
+
+    // Social features
+    following Follow[] @relation("Follower")
+    followers Follow[] @relation("Following")
+
+    // Authentication
+    refreshTokens RefreshToken[]
+
+    // Search functionality
+    searchHistory SearchHistory[]
+
+    @@map("users")
+}
+
+model UserSettings {
+    id     Int  @id @default(autoincrement())
+    userId Int  @unique
+    user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Audio preferences
+    audioQuality    String @default("320") // 96, 160, 320 kbps
+    downloadQuality String @default("320")
+
+    // Privacy settings
+    profilePublic Boolean @default(true)
+    showActivity  Boolean @default(true)
+    showPlaylists Boolean @default(true)
+
+    // Notification preferences
+    emailNotifications Boolean @default(true)
+    pushNotifications  Boolean @default(true)
+    newFollowerNotif   Boolean @default(true)
+    playlistShareNotif Boolean @default(true)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@map("user_settings")
+}
+
+model LikedSong {
+    id         Int      @id @default(autoincrement())
+    userId     Int
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    songId     String // JioSaavn song ID
+    songName   String
+    artistName String
+    albumName  String?
+    imageUrl   String?
+    duration   Int? // in seconds
+    createdAt  DateTime @default(now())
+
+    @@unique([userId, songId])
+    @@map("liked_songs")
+}
+
+model LikedAlbum {
+    id         Int      @id @default(autoincrement())
+    userId     Int
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    albumId    String // JioSaavn album ID
+    albumName  String
+    artistName String
+    imageUrl   String?
+    year       String?
+    songCount  Int?
+    createdAt  DateTime @default(now())
+
+    @@unique([userId, albumId])
+    @@map("liked_albums")
+}
+
+model LikedArtist {
+    id         Int      @id @default(autoincrement())
+    userId     Int
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    artistId   String // JioSaavn artist ID
+    artistName String
+    imageUrl   String?
+    isVerified Boolean  @default(false)
+    createdAt  DateTime @default(now())
+
+    @@unique([userId, artistId])
+    @@map("liked_artists")
+}
+
+model LikedPlaylist {
+    id           Int      @id @default(autoincrement())
+    userId       Int
+    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    playlistId   String // Either JioSaavn playlist ID or our internal playlist ID
+    playlistName String
+    description  String?
+    imageUrl     String?
+    isExternal   Boolean  @default(true) // true for JioSaavn, false for user playlists
+    createdAt    DateTime @default(now())
+
+    @@unique([userId, playlistId])
+    @@map("liked_playlists")
+}
+
+model Playlist {
+    id              Int     @id @default(autoincrement())
+    name            String
+    description     String?
+    imageUrl        String?
+    isPublic        Boolean @default(false)
+    isCollaborative Boolean @default(false)
+
+    // Owner
+    userId Int
+    user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Songs in playlist
+    songs PlaylistSong[]
+
+    // Playlist collaborators
+    collaborators PlaylistCollaborator[]
+
+    // Playlist analytics
+    playCount  Int @default(0)
+    shareCount Int @default(0)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@map("playlists")
+}
+
+model PlaylistSong {
+    id         Int      @id @default(autoincrement())
+    playlistId Int
+    playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+    songId     String // JioSaavn song ID
+    songName   String
+    artistName String
+    albumName  String?
+    imageUrl   String?
+    duration   Int? // in seconds
+
+    position Int // Order in playlist
+    addedBy  Int? // User who added this song
+    addedAt  DateTime @default(now())
+
+    @@unique([playlistId, songId])
+    @@map("playlist_songs")
+}
+
+model PlaylistCollaborator {
+    id             Int       @id @default(autoincrement())
+    playlistId     Int
+    playlist       Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+    userId         Int
+    canEdit        Boolean   @default(false)
+    canAddSongs    Boolean   @default(true)
+    canRemoveSongs Boolean   @default(false)
+    invitedAt      DateTime  @default(now())
+    acceptedAt     DateTime?
+
+    @@unique([playlistId, userId])
+    @@map("playlist_collaborators")
+}
+
+model PlayHistory {
+    id     Int  @id @default(autoincrement())
+    userId Int
+    user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    songId     String // JioSaavn song ID
+    songName   String
+    artistName String
+    albumName  String?
+    imageUrl   String?
+    duration   Int? // in seconds
+
+    playedAt     DateTime @default(now())
+    playDuration Int? // How long user listened (in seconds)
+    completed    Boolean  @default(false) // Did user listen to full song
+
+    // Context of play
+    source   String? // "search", "album", "playlist", "artist", "radio", "vibe"
+    sourceId String? // ID of the source (playlist id, album id, etc.)
+
+    @@map("play_history")
+}
+
+// Vibe Sessions - Multi-user synchronized music listening
+model VibeSession {
+    id          Int     @id @default(autoincrement())
+    name        String
+    description String?
+    isPublic    Boolean @default(false)
+    maxMembers  Int     @default(10)
+
+    // Session creator
+    creatorId Int
+    creator   User @relation("VibeCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+    // Current playing song
+    currentSongId     String?
+    currentSongName   String?
+    currentArtistName String?
+    currentImageUrl   String?
+
+    // Playback state
+    isPlaying       Boolean  @default(false)
+    currentPosition Int      @default(0) // in seconds
+    lastUpdated     DateTime @default(now())
+
+    // Session settings
+    allowGuestControl Boolean @default(false)
+    queueMode         String  @default("collaborative") // "collaborative", "host-only"
+
+    // Participants
+    participants VibeParticipant[]
+    queue        VibeQueue[]
+
+    // Session lifecycle
+    startedAt DateTime  @default(now())
+    endedAt   DateTime?
+    isActive  Boolean   @default(true)
+
+    @@map("vibe_sessions")
+}
+
+model VibeParticipant {
+    id        Int         @id @default(autoincrement())
+    sessionId Int
+    session   VibeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+    userId    Int
+    user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    role     String    @default("member") // "admin", "member", "guest"
+    joinedAt DateTime  @default(now())
+    leftAt   DateTime?
+    isActive Boolean   @default(true)
+
+    @@unique([sessionId, userId])
+    @@map("vibe_participants")
+}
+
+model VibeQueue {
+    id        Int         @id @default(autoincrement())
+    sessionId Int
+    session   VibeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+    songId     String
+    songName   String
+    artistName String
+    imageUrl   String?
+    duration   Int? // in seconds
+
+    addedBy  Int // User who added the song
+    position Int // Position in queue
+    played   Boolean  @default(false)
+    addedAt  DateTime @default(now())
+
+    @@map("vibe_queue")
+}
+
+// Social features
+model Follow {
+    id          Int      @id @default(autoincrement())
+    followerId  Int
+    follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+    followingId Int
+    following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+    createdAt   DateTime @default(now())
+
+    @@unique([followerId, followingId])
+    @@map("follows")
+}
+
+// Authentication
+model RefreshToken {
+    id        Int      @id @default(autoincrement())
+    tokenId   String   @unique
+    userId    Int
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    expiresAt DateTime
+    isRevoked Boolean  @default(false)
+    createdAt DateTime @default(now())
+
+    @@map("refresh_tokens")
+}
+
+// Search functionality
+model SearchHistory {
+    id        Int      @id @default(autoincrement())
+    userId    Int
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    
+    query     String   // The search query
+    searchType String  @default("all") // "all", "songs", "albums", "artists", "playlists"
+    searchCount Int    @default(1) // Number of times this query was searched
+    
+    // Search context
+    resultsCount Int?  // Number of results found
+    clickedResult String? // ID of clicked result (song, album, etc.)
+    clickedType   String? // Type of clicked result
+    
+    // Search metadata
+    language String? // User's language preference at time of search
+    source   String? // Where search was initiated ("home", "discover", "library")
+    
+    searchedAt DateTime @default(now())
+
+    @@unique([userId, query], name: "userId_query")
+    @@map("search_history")
+}
