@@ -436,54 +436,67 @@ router.post('/recent', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Song ID, name, and artist are required' });
     }
 
-    // Check if song already exists in recently played
-    const existingSong = await prisma.recentlyPlayed.findFirst({
-      where: { userId, songId }
-    });
-
-    if (existingSong) {
-      // If song exists, remove it from its current position
-      await prisma.recentlyPlayed.delete({
-        where: { id: existingSong.id }
+    // Use a transaction to ensure data consistency
+    const result = await prisma.$transaction(async (tx) => {
+      // Check if song already exists in recently played
+      const existingSong = await tx.recentlyPlayed.findFirst({
+        where: { userId, songId }
       });
-    }
 
-    // Get current count of recently played songs
-    const currentCount = await prisma.recentlyPlayed.count({
-      where: { userId }
-    });
+      if (existingSong) {
+        // If song exists, remove it from its current position
+        await tx.recentlyPlayed.delete({
+          where: { id: existingSong.id }
+        });
+      }
 
-    // If we have 10 songs, remove the oldest one (position 9)
-    if (currentCount >= 10) {
-      await prisma.recentlyPlayed.deleteMany({
-        where: { 
+      // Get current count of recently played songs
+      const currentCount = await tx.recentlyPlayed.count({
+        where: { userId }
+      });
+
+      // If we have 10 songs, remove the oldest one (position 9)
+      if (currentCount >= 10) {
+        await tx.recentlyPlayed.deleteMany({
+          where: { 
+            userId,
+            position: 9
+          }
+        });
+      }
+
+      // Shift all existing songs down by 1 position (in reverse order to avoid conflicts)
+      const existingSongs = await tx.recentlyPlayed.findMany({
+        where: { userId },
+        orderBy: { position: 'desc' } // Start from highest position
+      });
+
+      // Update positions in reverse order to avoid unique constraint violations
+      for (const song of existingSongs) {
+        await tx.recentlyPlayed.update({
+          where: { id: song.id },
+          data: { position: song.position + 1 }
+        });
+      }
+
+      // Add new song at position 0 (most recent)
+      const newSong = await tx.recentlyPlayed.create({
+        data: {
           userId,
-          position: 9
+          songId,
+          songName,
+          artistName,
+          albumName,
+          imageUrl,
+          duration,
+          position: 0
         }
       });
-    }
 
-    // Shift all existing songs down by 1 position
-    await prisma.recentlyPlayed.updateMany({
-      where: { userId },
-      data: { position: { increment: 1 } }
+      return newSong;
     });
 
-    // Add new song at position 0 (most recent)
-    const newSong = await prisma.recentlyPlayed.create({
-      data: {
-        userId,
-        songId,
-        songName,
-        artistName,
-        albumName,
-        imageUrl,
-        duration,
-        position: 0
-      }
-    });
-
-    res.json({ success: true, song: newSong });
+    res.json({ success: true, song: result });
   } catch (err) {
     console.error('Error adding to recently played:', err);
     res.status(500).json({ error: 'Failed to add song to recently played' });
