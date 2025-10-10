@@ -426,17 +426,80 @@ router.get('/playlists/:playlistId/check', authenticateToken, async (req, res) =
 
 // ========== RECENTLY PLAYED ==========
 
+// Add song to recently played (maintains last 10 songs)
+router.post('/recent', authenticateToken, async (req, res) => {
+  try {
+    const { songId, songName, artistName, albumName, imageUrl, duration } = req.body;
+    const userId = req.user.userId;
+    
+    if (!songId || !songName || !artistName) {
+      return res.status(400).json({ error: 'Song ID, name, and artist are required' });
+    }
+
+    // Check if song already exists in recently played
+    const existingSong = await prisma.recentlyPlayed.findFirst({
+      where: { userId, songId }
+    });
+
+    if (existingSong) {
+      // If song exists, remove it from its current position
+      await prisma.recentlyPlayed.delete({
+        where: { id: existingSong.id }
+      });
+    }
+
+    // Get current count of recently played songs
+    const currentCount = await prisma.recentlyPlayed.count({
+      where: { userId }
+    });
+
+    // If we have 10 songs, remove the oldest one (position 9)
+    if (currentCount >= 10) {
+      await prisma.recentlyPlayed.deleteMany({
+        where: { 
+          userId,
+          position: 9
+        }
+      });
+    }
+
+    // Shift all existing songs down by 1 position
+    await prisma.recentlyPlayed.updateMany({
+      where: { userId },
+      data: { position: { increment: 1 } }
+    });
+
+    // Add new song at position 0 (most recent)
+    const newSong = await prisma.recentlyPlayed.create({
+      data: {
+        userId,
+        songId,
+        songName,
+        artistName,
+        albumName,
+        imageUrl,
+        duration,
+        position: 0
+      }
+    });
+
+    res.json({ success: true, song: newSong });
+  } catch (err) {
+    console.error('Error adding to recently played:', err);
+    res.status(500).json({ error: 'Failed to add song to recently played' });
+  }
+});
+
 // Get recently played songs
 router.get('/recent', authenticateToken, async (req, res) => {
   try {
-    const { limit = 50 } = req.query;
     const userId = req.user.userId;
     
-    // Get recently played songs from user's liked songs (ordered by creation date)
-    const recentSongs = await prisma.likedSong.findMany({
+    // Get recently played songs ordered by position (most recent first)
+    const recentSongs = await prisma.recentlyPlayed.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: parseInt(limit)
+      orderBy: { position: 'asc' },
+      take: 10
     });
     
     res.json({ recentSongs, total: recentSongs.length });
@@ -468,8 +531,8 @@ router.get('/overview', authenticateToken, async (req, res) => {
       prisma.playlist.count({ where: { userId } })
     ]);
     
-    // Get recently added items (last 10 of each type)
-    const [recentSongs, recentAlbums, recentArtists, recentPlaylists] = await Promise.all([
+    // Get recently added items (last 10 of each type) and recently played songs
+    const [recentSongs, recentAlbums, recentArtists, recentPlaylists, recentlyPlayedSongs] = await Promise.all([
       prisma.likedSong.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
@@ -492,6 +555,11 @@ router.get('/overview', authenticateToken, async (req, res) => {
         },
         orderBy: { createdAt: 'desc' },
         take: 10
+      }),
+      prisma.recentlyPlayed.findMany({
+        where: { userId },
+        orderBy: { position: 'asc' },
+        take: 10
       })
     ]);
     
@@ -508,7 +576,8 @@ router.get('/overview', authenticateToken, async (req, res) => {
           songs: recentSongs,
           albums: recentAlbums,
           artists: recentArtists,
-          playlists: recentPlaylists
+          playlists: recentPlaylists,
+          played: recentlyPlayedSongs
         }
       }
     });

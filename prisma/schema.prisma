@@ -31,8 +31,9 @@ model User {
     playlists Playlist[]
 
     // User's listening history and activities
-    playHistory  PlayHistory[]
-    userSettings UserSettings?
+    playHistory    PlayHistory[]
+    recentlyPlayed RecentlyPlayed[]
+    userSettings   UserSettings?
 
     // Vibe sessions (multi-user sync music)
     createdVibes VibeSession[]     @relation("VibeCreator")
@@ -224,6 +225,27 @@ model PlayHistory {
     @@map("play_history")
 }
 
+// Recently Played Songs - Maintains last 10 songs per user
+model RecentlyPlayed {
+    id         Int      @id @default(autoincrement())
+    userId     Int
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    songId     String // JioSaavn song ID
+    songName   String
+    artistName String
+    albumName  String?
+    imageUrl   String?
+    duration   Int? // in seconds
+
+    playedAt   DateTime @default(now())
+    position   Int      // Position in the recently played list (0-9)
+
+    @@unique([userId, songId])
+    @@unique([userId, position])
+    @@map("recently_played")
+}
+
 // Vibe Sessions - Multi-user synchronized music listening
 model VibeSession {
     id          Int     @id @default(autoincrement())
@@ -345,6 +367,5 @@ model SearchHistory {
     
     searchedAt DateTime @default(now())
 
-    @@unique([userId, query], name: "userId_query")
     @@map("search_history")
 }
