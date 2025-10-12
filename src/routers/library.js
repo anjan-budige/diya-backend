@@ -436,24 +436,23 @@ router.post('/recent', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Song ID, name, and artist are required' });
     }
 
-    // Use a transaction to ensure data consistency and avoid unique conflicts
-    // Use root client inside transaction callback to avoid undefined TX proxy methods in some runtimes
-    const result = await prisma.$transaction(async () => {
-      const existing = await prisma.recentlyPlayed.findFirst({ where: { userId, songId } });
-      if (existing) {
-        await prisma.recentlyPlayed.delete({ where: { id: existing.id } });
-      }
-      const existingSongs = await prisma.recentlyPlayed.findMany({ where: { userId }, orderBy: { position: 'desc' } });
-      for (const s of existingSongs) {
-        await prisma.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
-      }
-      const overflow = await prisma.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
-      for (const s of overflow) {
-        await prisma.recentlyPlayed.delete({ where: { id: s.id } });
-      }
-      const newSong = await prisma.recentlyPlayed.create({ data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 } });
-      return newSong;
-    });
+    // Non-transactional, sequential ops for portability
+    const existing = await prisma.recentlyPlayed.findFirst({ where: { userId, songId } });
+    if (existing) {
+      await prisma.recentlyPlayed.delete({ where: { id: existing.id } });
+    }
+
+    const existingSongs = await prisma.recentlyPlayed.findMany({ where: { userId }, orderBy: { position: 'desc' } });
+    for (const s of existingSongs) {
+      await prisma.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
+    }
+
+    const overflow = await prisma.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
+    for (const s of overflow) {
+      await prisma.recentlyPlayed.delete({ where: { id: s.id } });
+    }
+
+    const result = await prisma.recentlyPlayed.create({ data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 } });
 
     res.json({ success: true, song: result });
   } catch (err) {
