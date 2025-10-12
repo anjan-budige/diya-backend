@@ -436,50 +436,23 @@ router.post('/recent', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Song ID, name, and artist are required' });
     }
 
-    // Use a transaction to ensure data consistency
+    // Use a transaction to ensure data consistency and avoid unique conflicts
     const result = await prisma.$transaction(async (tx) => {
-      // Check if song already exists in recently played
-      const existingSong = await tx.recentlyPlayed.findFirst({
-        where: { userId, songId }
-      });
+      // Remove any existing instance of this song for this user (idempotent)
+      await tx.recentlyPlayed.deleteMany({ where: { userId, songId } });
 
-      if (existingSong) {
-        // If song exists, remove it from its current position
-        await tx.recentlyPlayed.delete({
-          where: { id: existingSong.id }
-        });
-      }
-
-      // Get current count of recently played songs
-      const currentCount = await tx.recentlyPlayed.count({
-        where: { userId }
-      });
-
-      // If we have 10 songs, remove the oldest one (position 9)
-      if (currentCount >= 10) {
-        await tx.recentlyPlayed.deleteMany({
-          where: { 
-            userId,
-            position: 9
-          }
-        });
-      }
-
-      // Shift all existing songs down by 1 position (in reverse order to avoid conflicts)
-      const existingSongs = await tx.recentlyPlayed.findMany({
+      // Increment positions for all existing items
+      await tx.recentlyPlayed.updateMany({
         where: { userId },
-        orderBy: { position: 'desc' } // Start from highest position
+        data: { position: { increment: 1 } },
       });
 
-      // Update positions in reverse order to avoid unique constraint violations
-      for (const song of existingSongs) {
-        await tx.recentlyPlayed.update({
-          where: { id: song.id },
-          data: { position: song.position + 1 }
-        });
-      }
+      // Trim any items that overflow the max list (>= 10)
+      await tx.recentlyPlayed.deleteMany({
+        where: { userId, position: { gte: 10 } },
+      });
 
-      // Add new song at position 0 (most recent)
+      // Insert the new most-recent item at position 0
       const newSong = await tx.recentlyPlayed.create({
         data: {
           userId,
@@ -489,8 +462,8 @@ router.post('/recent', authenticateToken, async (req, res) => {
           albumName,
           imageUrl,
           duration,
-          position: 0
-        }
+          position: 0,
+        },
       });
 
       return newSong;
@@ -499,6 +472,10 @@ router.post('/recent', authenticateToken, async (req, res) => {
     res.json({ success: true, song: result });
   } catch (err) {
     console.error('Error adding to recently played:', err);
+    // Swallow duplicate unique errors as success to preserve UX in rare race conditions
+    if (err && err.code === 'P2002') {
+      return res.json({ success: true, duplicate: true });
+    }
     res.status(500).json({ error: 'Failed to add song to recently played' });
   }
 });
