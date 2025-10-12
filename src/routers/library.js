@@ -439,31 +439,29 @@ router.post('/recent', authenticateToken, async (req, res) => {
     // Use a transaction to ensure data consistency and avoid unique conflicts
     const result = await prisma.$transaction(async (tx) => {
       // Remove any existing instance of this song for this user (idempotent)
-      await tx.recentlyPlayed.deleteMany({ where: { userId, songId } });
+      const existing = await tx.recentlyPlayed.findFirst({ where: { userId, songId } });
+      if (existing) {
+        await tx.recentlyPlayed.delete({ where: { id: existing.id } });
+      }
 
-      // Increment positions for all existing items
-      await tx.recentlyPlayed.updateMany({
+      // Shift all existing songs down by 1 position (reverse order to avoid unique conflicts)
+      const existingSongs = await tx.recentlyPlayed.findMany({
         where: { userId },
-        data: { position: { increment: 1 } },
+        orderBy: { position: 'desc' },
       });
+      for (const s of existingSongs) {
+        await tx.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
+      }
 
-      // Trim any items that overflow the max list (>= 10)
-      await tx.recentlyPlayed.deleteMany({
-        where: { userId, position: { gte: 10 } },
-      });
+      // Trim overflow (position >= 10)
+      const overflow = await tx.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
+      for (const s of overflow) {
+        await tx.recentlyPlayed.delete({ where: { id: s.id } });
+      }
 
-      // Insert the new most-recent item at position 0
+      // Insert new at position 0
       const newSong = await tx.recentlyPlayed.create({
-        data: {
-          userId,
-          songId,
-          songName,
-          artistName,
-          albumName,
-          imageUrl,
-          duration,
-          position: 0,
-        },
+        data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 },
       });
 
       return newSong;
