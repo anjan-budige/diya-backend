@@ -437,33 +437,21 @@ router.post('/recent', authenticateToken, async (req, res) => {
     }
 
     // Use a transaction to ensure data consistency and avoid unique conflicts
-    const result = await prisma.$transaction(async (tx) => {
-      // Remove any existing instance of this song for this user (idempotent)
-      const existing = await tx.recentlyPlayed.findFirst({ where: { userId, songId } });
+    // Use root client inside transaction callback to avoid undefined TX proxy methods in some runtimes
+    const result = await prisma.$transaction(async () => {
+      const existing = await prisma.recentlyPlayed.findFirst({ where: { userId, songId } });
       if (existing) {
-        await tx.recentlyPlayed.delete({ where: { id: existing.id } });
+        await prisma.recentlyPlayed.delete({ where: { id: existing.id } });
       }
-
-      // Shift all existing songs down by 1 position (reverse order to avoid unique conflicts)
-      const existingSongs = await tx.recentlyPlayed.findMany({
-        where: { userId },
-        orderBy: { position: 'desc' },
-      });
+      const existingSongs = await prisma.recentlyPlayed.findMany({ where: { userId }, orderBy: { position: 'desc' } });
       for (const s of existingSongs) {
-        await tx.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
+        await prisma.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
       }
-
-      // Trim overflow (position >= 10)
-      const overflow = await tx.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
+      const overflow = await prisma.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
       for (const s of overflow) {
-        await tx.recentlyPlayed.delete({ where: { id: s.id } });
+        await prisma.recentlyPlayed.delete({ where: { id: s.id } });
       }
-
-      // Insert new at position 0
-      const newSong = await tx.recentlyPlayed.create({
-        data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 },
-      });
-
+      const newSong = await prisma.recentlyPlayed.create({ data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 } });
       return newSong;
     });
 
