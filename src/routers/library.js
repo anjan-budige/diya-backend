@@ -437,20 +437,14 @@ router.post('/recent', authenticateToken, async (req, res) => {
     }
 
     // Non-transactional, sequential ops for portability
-    const existing = await prisma.recentlyPlayed.findFirst({ where: { userId, songId } });
-    if (existing) {
-      await prisma.recentlyPlayed.delete({ where: { id: existing.id } });
-    }
+    // Remove any existing instance (idempotent)
+    await prisma.recentlyPlayed.deleteMany({ where: { userId, songId } });
 
-    const existingSongs = await prisma.recentlyPlayed.findMany({ where: { userId }, orderBy: { position: 'desc' } });
-    for (const s of existingSongs) {
-      await prisma.recentlyPlayed.update({ where: { id: s.id }, data: { position: s.position + 1 } });
-    }
+    // Shift positions down by +1 for this user
+    await prisma.recentlyPlayed.updateMany({ where: { userId }, data: { position: { increment: 1 } } });
 
-    const overflow = await prisma.recentlyPlayed.findMany({ where: { userId, position: { gte: 10 } } });
-    for (const s of overflow) {
-      await prisma.recentlyPlayed.delete({ where: { id: s.id } });
-    }
+    // Trim overflow (keep only 0..9)
+    await prisma.recentlyPlayed.deleteMany({ where: { userId, position: { gte: 10 } } });
 
     const result = await prisma.recentlyPlayed.create({ data: { userId, songId, songName, artistName, albumName, imageUrl, duration, position: 0 } });
 
