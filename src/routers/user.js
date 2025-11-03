@@ -2,15 +2,12 @@ import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your_refresh_secret_key_change_in_production';
-const ACCESS_TOKEN_EXPIRY = '15m'; // Short-lived access tokens
-const REFRESH_TOKEN_EXPIRY = '7d'; // Longer-lived refresh tokens
+const ACCESS_TOKEN_EXPIRY = '7d'; // Single long-lived access token (no refresh tokens)
 
 // Register new user
 router.post('/register', async (req, res) => {
@@ -57,7 +54,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Generate tokens
+    // Generate access token (valid for 7 days)
     const accessToken = jwt.sign(
       { 
         userId: user.id, 
@@ -68,27 +65,7 @@ router.post('/login', async (req, res) => {
       { expiresIn: ACCESS_TOKEN_EXPIRY }
     );
 
-    // Generate refresh token with rotation
-    const refreshTokenId = crypto.randomUUID();
-    const refreshToken = jwt.sign(
-      { 
-        userId: user.id, 
-        tokenId: refreshTokenId,
-        type: 'refresh'
-      }, 
-      JWT_REFRESH_SECRET, 
-      { expiresIn: REFRESH_TOKEN_EXPIRY }
-    );
-
-    // Store refresh token in database for rotation
-    await prisma.refreshToken.create({
-      data: {
-        tokenId: refreshTokenId,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-        isRevoked: false
-      }
-    });
+    // No refresh token generation
 
     // Update user's last login and online status
     await prisma.user.update({
@@ -104,9 +81,8 @@ router.post('/login', async (req, res) => {
 
     res.json({ 
       user: userWithoutPassword, 
-      accessToken, 
-      refreshToken,
-      expiresIn: 15 * 60 // 15 minutes in seconds
+      accessToken,
+      expiresIn: 7 * 24 * 60 * 60 // 7 days in seconds
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -114,117 +90,30 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Refresh token with rotation
-router.post('/refresh', async (req, res) => {
-  try {
-    const { refreshToken } = req.body;
-    
-    if (!refreshToken) {
-      return res.status(401).json({ error: 'Refresh token is required' });
-    }
-
-    // Verify refresh token
-    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
-    
-    if (decoded.type !== 'refresh') {
-      return res.status(401).json({ error: 'Invalid token type' });
-    }
-
-    // Check if refresh token exists in database and is not revoked
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { tokenId: decoded.tokenId },
-      include: { user: true }
-    });
-
-    if (!storedToken || storedToken.isRevoked || storedToken.expiresAt < new Date()) {
-      return res.status(401).json({ error: 'Invalid or expired refresh token' });
-    }
-
-    // Generate new access token
-    const newAccessToken = jwt.sign(
-      { 
-        userId: decoded.userId, 
-        email: storedToken.user.email,
-        type: 'access'
-      }, 
-      JWT_SECRET, 
-      { expiresIn: ACCESS_TOKEN_EXPIRY }
-    );
-
-    // Generate new refresh token (token rotation)
-    const newRefreshTokenId = crypto.randomUUID();
-    const newRefreshToken = jwt.sign(
-      { 
-        userId: decoded.userId, 
-        tokenId: newRefreshTokenId,
-        type: 'refresh'
-      }, 
-      JWT_REFRESH_SECRET, 
-      { expiresIn: REFRESH_TOKEN_EXPIRY }
-    );
-
-    // Revoke old refresh token and create new one
-    await prisma.$transaction([
-      prisma.refreshToken.update({
-        where: { tokenId: decoded.tokenId },
-        data: { isRevoked: true }
-      }),
-      prisma.refreshToken.create({
-        data: {
-          tokenId: newRefreshTokenId,
-          userId: decoded.userId,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-          isRevoked: false
-        }
-      })
-    ]);
-
-    res.json({ 
-      accessToken: newAccessToken, 
-      refreshToken: newRefreshToken,
-      expiresIn: 15 * 60 // 15 minutes in seconds
-    });
-  } catch (error) {
-    console.error('Refresh token error:', error);
-    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Invalid refresh token' });
-    }
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+// Refresh endpoint removed: using long-lived access tokens only
 
 // Logout endpoint
 router.post('/logout', async (req, res) => {
   try {
-    const { refreshToken } = req.body;
-    
-    if (refreshToken) {
+    // Best-effort: mark user offline if Authorization bearer token present
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token) {
       try {
-        const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
-        
-        // Revoke refresh token
-        await prisma.refreshToken.updateMany({
-          where: { 
-            tokenId: decoded.tokenId,
-            userId: decoded.userId
-          },
-          data: { isRevoked: true }
-        });
-
-        // Update user's online status
-        await prisma.user.update({
-          where: { id: decoded.userId },
-          data: { 
-            isOnline: false,
-            lastSeen: new Date()
-          }
-        });
-      } catch (error) {
-        // Token might be invalid, but we still want to respond successfully
-        console.log('Invalid refresh token during logout:', error.message);
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded?.userId) {
+          await prisma.user.update({
+            where: { id: decoded.userId },
+            data: { 
+              isOnline: false,
+              lastSeen: new Date()
+            }
+          });
+        }
+      } catch (e) {
+        // ignore token errors during logout
       }
     }
-
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
