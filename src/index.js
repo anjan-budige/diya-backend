@@ -13,6 +13,7 @@ import analyticsRouter from './routers/analytics.js';
 import discoverRouter from './routers/discover.js';
 import searchRouter from './routers/search.js';
 import saavnRouter from './routers/saavn.js';
+import appRouter from './routers/app.js';
 
 const app = express();
 const server = createServer(app);
@@ -151,6 +152,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/discover', discoverRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/saavn', saavnRouter);
+app.use('/api/app', appRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {
