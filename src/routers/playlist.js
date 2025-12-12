@@ -87,27 +87,40 @@ router.post('/', authenticateToken, async (req, res) => {
 // Get specific playlist details
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const playlistId = parseInt(req.params.id);
-    
-    const playlist = await prisma.playlist.findUnique({
-      where: { id: playlistId },
-      include: {
-        songs: {
-          orderBy: { position: 'asc' }
-        },
-        user: {
-          select: { id: true, fullname: true, avatar: true }
-        },
-        collaborators: {
-          include: {
-            user: {
-              select: { id: true, fullname: true, avatar: true }
+    const playlistId = Number(req.params.id);
+    if (!Number.isInteger(playlistId) || playlistId <= 0) {
+      return res.status(400).json({ error: 'Invalid playlist id' });
+    }
+
+    let playlist;
+    try {
+      playlist = await prisma.playlist.findUnique({
+        where: { id: playlistId },
+        include: {
+          songs: {
+            orderBy: { position: 'asc' }
+          },
+          user: {
+            select: { id: true, fullname: true, avatar: true }
+          },
+          collaborators: {
+            include: {
+              user: {
+                select: { id: true, fullname: true, avatar: true }
+              }
             }
-          }
-        },
-        _count: { select: { songs: true } }
-      }
-    });
+          },
+          _count: { select: { songs: true } }
+        }
+      });
+    } catch (prismaErr) {
+      // Prisma/schema mismatch (common on deployments with drift) or query error.
+      console.error('Failed to fetch playlist (Prisma error):', prismaErr);
+      return res.status(500).json({
+        error: 'Failed to fetch playlist',
+        message: process.env.NODE_ENV === 'development' ? prismaErr?.message : undefined,
+      });
+    }
     
     if (!playlist) {
       return res.status(404).json({ error: 'Playlist not found' });
@@ -132,6 +145,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     
     res.json({ playlist });
   } catch (err) {
+    console.error('Failed to fetch playlist:', err);
     res.status(500).json({ error: 'Failed to fetch playlist' });
   }
 });
