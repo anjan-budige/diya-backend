@@ -104,10 +104,15 @@ router.get('/:id', authenticateToken, async (req, res) => {
             select: { id: true, fullname: true, avatar: true }
           },
           collaborators: {
-            include: {
-              user: {
-                select: { id: true, fullname: true, avatar: true }
-              }
+            select: {
+              id: true,
+              playlistId: true,
+              userId: true,
+              canEdit: true,
+              canAddSongs: true,
+              canRemoveSongs: true,
+              invitedAt: true,
+              acceptedAt: true
             }
           },
           _count: { select: { songs: true } }
