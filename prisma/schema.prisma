@@ -1,0 +1,327 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             Int               @id @default(autoincrement())
+  fullname       String
+  email          String            @unique
+  password       String
+  bio            String?
+  mobile         String?
+  language       String
+  avatar         String?
+  isOnline       Boolean           @default(false)
+  lastSeen       DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  following      Follow[]          @relation("Follower")
+  followers      Follow[]          @relation("Following")
+  likedAlbums    LikedAlbum[]
+  likedArtists   LikedArtist[]
+  likedPlaylists LikedPlaylist[]
+  likedSongs     LikedSong[]
+  playHistory    PlayHistory[]
+  playlists      Playlist[]
+  recentlyPlayed RecentlyPlayed[]
+  refreshTokens  RefreshToken[]
+  searchHistory  SearchHistory[]
+  userSettings   UserSettings?
+  joinedVibes    VibeParticipant[]
+  createdVibes   VibeSession[]     @relation("VibeCreator")
+  vibeInvitationsSent     VibeInvitation[] @relation("Inviter")
+  vibeInvitationsReceived VibeInvitation[] @relation("InvitedUser")
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                 Int      @id @default(autoincrement())
+  userId             Int      @unique
+  audioQuality       String   @default("320")
+  downloadQuality    String   @default("320")
+  profilePublic      Boolean  @default(true)
+  showActivity       Boolean  @default(true)
+  showPlaylists      Boolean  @default(true)
+  emailNotifications Boolean  @default(true)
+  pushNotifications  Boolean  @default(true)
+  newFollowerNotif   Boolean  @default(true)
+  playlistShareNotif Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model LikedSong {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  songId     String
+  songName   String
+  artistName String
+  albumName  String?
+  imageUrl   String?
+  duration   Int?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@map("liked_songs")
+}
+
+model LikedAlbum {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  albumId    String
+  albumName  String
+  artistName String
+  imageUrl   String?
+  year       String?
+  songCount  Int?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, albumId])
+  @@map("liked_albums")
+}
+
+model LikedArtist {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  artistId   String
+  artistName String
+  imageUrl   String?
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, artistId])
+  @@map("liked_artists")
+}
+
+model LikedPlaylist {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  playlistId   String
+  playlistName String
+  description  String?
+  imageUrl     String?
+  isExternal   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, playlistId])
+  @@map("liked_playlists")
+}
+
+model Playlist {
+  id              Int                    @id @default(autoincrement())
+  name            String
+  description     String?
+  imageUrl        String?
+  isPublic        Boolean                @default(false)
+  isCollaborative Boolean                @default(false)
+  userId          Int
+  playCount       Int                    @default(0)
+  shareCount      Int                    @default(0)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  collaborators   PlaylistCollaborator[]
+  songs           PlaylistSong[]
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("playlists")
+}
+
+model PlaylistSong {
+  id         Int      @id @default(autoincrement())
+  playlistId Int
+  songId     String
+  songName   String
+  artistName String
+  albumName  String?
+  imageUrl   String?
+  duration   Int?
+  position   Int
+  addedBy    Int?
+  addedAt    DateTime @default(now())
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, songId])
+  @@map("playlist_songs")
+}
+
+model PlaylistCollaborator {
+  id             Int       @id @default(autoincrement())
+  playlistId     Int
+  userId         Int
+  canEdit        Boolean   @default(false)
+  canAddSongs    Boolean   @default(true)
+  canRemoveSongs Boolean   @default(false)
+  invitedAt      DateTime  @default(now())
+  acceptedAt     DateTime?
+  playlist       Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, userId])
+  @@map("playlist_collaborators")
+}
+
+model PlayHistory {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  songId       String
+  songName     String
+  artistName   String
+  albumName    String?
+  imageUrl     String?
+  duration     Int?
+  playedAt     DateTime @default(now())
+  playDuration Int?
+  completed    Boolean  @default(false)
+  source       String?
+  sourceId     String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("play_history")
+}
+
+model RecentlyPlayed {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  songId     String
+  songName   String
+  artistName String
+  albumName  String?
+  imageUrl   String?
+  duration   Int?
+  playedAt   DateTime @default(now())
+  position   Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@unique([userId, position])
+  @@map("recently_played")
+}
+
+model VibeSession {
+  id                Int               @id @default(autoincrement())
+  name              String
+  description       String?
+  isPublic          Boolean           @default(false)
+  maxMembers        Int               @default(10)
+  creatorId         Int
+  currentSongId     String?
+  currentSongName   String?
+  currentArtistName String?
+  currentImageUrl   String?
+  isPlaying         Boolean           @default(false)
+  currentPosition   Int               @default(0)
+  lastUpdated       DateTime          @default(now())
+  allowGuestControl Boolean           @default(false)
+  queueMode         String            @default("collaborative")
+  startedAt         DateTime          @default(now())
+  endedAt           DateTime?
+  isActive          Boolean           @default(true)
+  participants      VibeParticipant[]
+  queue             VibeQueue[]
+  invitations       VibeInvitation[]
+  creator           User              @relation("VibeCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@map("vibe_sessions")
+}
+
+model VibeParticipant {
+  id        Int         @id @default(autoincrement())
+  sessionId Int
+  userId    Int
+  role      String      @default("member")
+  joinedAt  DateTime    @default(now())
+  leftAt    DateTime?
+  isActive  Boolean     @default(true)
+  session   VibeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@map("vibe_participants")
+}
+
+model VibeQueue {
+  id         Int         @id @default(autoincrement())
+  sessionId  Int
+  songId     String
+  songName   String
+  artistName String
+  imageUrl   String?
+  duration   Int?
+  addedBy    Int
+  position   Int
+  played     Boolean     @default(false)
+  addedAt    DateTime    @default(now())
+  session    VibeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("vibe_queue")
+}
+
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  tokenId   String   @unique
+  userId    Int
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model SearchHistory {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  query         String
+  searchType    String   @default("all")
+  searchCount   Int      @default(1)
+  resultsCount  Int?
+  clickedResult String?
+  clickedType   String?
+  language      String?
+  source        String?
+  searchedAt    DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("search_history")
+}
+
+model VibeInvitation {
+  id            Int         @id @default(autoincrement())
+  sessionId     Int
+  invitedUserId Int
+  invitedBy     Int
+  status        String      @default("pending") // pending, accepted, declined, expired
+  createdAt     DateTime    @default(now())
+  
+  session       VibeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  invitedUser   User        @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  inviter       User        @relation("Inviter", fields: [invitedBy], references: [id], onDelete: Cascade)
+  
+  @@unique([sessionId, invitedUserId, status])
+  @@index([invitedUserId, status])
+  @@map("vibe_invitations")
+}
